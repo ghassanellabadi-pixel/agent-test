@@ -78,7 +78,9 @@ function wikiResponse(url) {
 }
 
 // The YouTube IFrame API, as far as the game uses it. Behaviour is set per
-// test through window.__ytStub: { blockAutoplay, errorAll, wrongTitles, titles }.
+// test through window.__ytStub: { blockAutoplay, errorAll, wrongTitles, titles,
+// adSeconds }. With adSeconds an ad plays first: seeks are ignored and the ad's
+// own length is reported, and a click (after 1.5 s) skips it.
 const YT_STUB = `(function () {
   var cfg = window.__ytStub || {};
   var S = { UNSTARTED: -1, ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 };
@@ -121,14 +123,37 @@ const YT_STUB = `(function () {
   }
   Player.prototype.fire = function (name, e) { var fn = this.ev[name]; if (fn) { e.target = this; fn(e); } };
   Player.prototype.set = function (s) { this.state = s; window.__ytLog.push(['state', this.vid, s]); this.fire('onStateChange', { data: s }); };
-  Player.prototype.getCurrentTime = function () { return this.playing ? this.base + (Date.now() - this.t0) / 1000 : this.base; };
-  Player.prototype.getDuration = function () { return 150; };
+  Player.prototype.getCurrentTime = function () {
+    if (this.inAd) return (Date.now() - this.adStart) / 1000;
+    return this.playing ? this.base + (Date.now() - this.t0) / 1000 : this.base;
+  };
+  Player.prototype.getDuration = function () { return this.inAd ? cfg.adSeconds : 150; };
   Player.prototype.getPlayerState = function () { return this.state; };
   Player.prototype.getVideoData = function () { return { video_id: this.vid, title: titleFor(this.vid), author: 'Test' }; };
   Player.prototype.playVideo = function () {
     var self = this;
     if (this.dead || this.playing || cfg.errorAll) return;
     if (cfg.blockAutoplay && !this.clicked) return;
+    this.set(S.BUFFERING);
+    setTimeout(function () {
+      if (self.dead) return;
+      if (cfg.adSeconds && !self.adDone) { self.startAd(); return; }
+      self.t0 = Date.now(); self.playing = true; self.set(S.PLAYING);
+    }, 120);
+  };
+  Player.prototype.startAd = function () {
+    var self = this;
+    this.inAd = true; this.adStart = Date.now(); this.playing = true;
+    window.__ytLog.push(['ad', this.vid]);
+    this.set(S.PLAYING);
+    this.adTimer = setTimeout(function () { self.endAd(); }, cfg.adSeconds * 1000);
+  };
+  Player.prototype.endAd = function () {
+    var self = this;
+    if (!this.inAd || this.dead) return;
+    clearTimeout(this.adTimer);
+    this.inAd = false; this.adDone = true; this.playing = false; this.base = 0;
+    window.__ytLog.push(['ad-end', this.vid]);
     this.set(S.BUFFERING);
     setTimeout(function () { if (self.dead) return; self.t0 = Date.now(); self.playing = true; self.set(S.PLAYING); }, 120);
   };
@@ -138,6 +163,7 @@ const YT_STUB = `(function () {
   };
   Player.prototype.seekTo = function (t) {
     var self = this, was = this.playing;
+    if (this.inAd) { window.__ytLog.push(['seek-ignored', this.vid, t]); return; }
     window.__ytLog.push(['seek', this.vid, t]);
     this.base = t; this.t0 = Date.now();
     if (!was) return;
@@ -148,13 +174,17 @@ const YT_STUB = `(function () {
   Player.prototype.mute = function () {};
   Player.prototype.unMute = function () {};
   Player.prototype.destroy = function () {
-    this.dead = true; window.__ytLog.push(['destroy', this.vid]);
+    this.dead = true; clearTimeout(this.adTimer); window.__ytLog.push(['destroy', this.vid]);
     if (this.iframe && this.iframe.parentNode) this.iframe.parentNode.removeChild(this.iframe);
   };
   window.addEventListener('message', function (e) {
     var p = e.data && players[e.data.ytStubClick];
-    if (p && !p.dead) { p.clicked = true; p.playVideo(); }
+    if (!p || p.dead) return;
+    if (p.inAd) { if (Date.now() - p.adStart > 1500) p.endAd(); return; }   // "Skip ad"
+    p.clicked = true;
+    p.playVideo();
   });
+  window.__ytPlayers = players;
   window.YT = { Player: Player, PlayerState: S };
   setTimeout(function () { if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady(); }, 30);
 })();`;

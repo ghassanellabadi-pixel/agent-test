@@ -300,9 +300,11 @@
   // so studio logos and title cards are skipped. Resolves a controller once the
   // clip is actually playing; rejects if none of the ids work.
   //   opts.ids, opts.audio, opts.start, opts.custom, opts.names
-  //   opts.cancelled()  true once the round has moved on
-  //   opts.onNeedTap()  the browser wants a click before it plays sound; the
-  //                     page should let the next click through to the player
+  //   opts.cancelled()     true once the round has moved on
+  //   opts.onNeedTap(on)   the browser wants a click before it plays sound; the
+  //                        page should let the next click through to the player
+  //   opts.onAd()          YouTube is showing an ad first; the page can show the
+  //                        player so the host can skip it
   function playClip(slot, opts) {
     var ids = opts.ids.slice();
     return loadYouTube().then(function (YT) {
@@ -320,35 +322,45 @@
       var at = entry.indexOf('@');
       var id = at > 0 ? entry.slice(0, at) : entry;
       var fixedStart = at > 0 ? Number(entry.slice(at + 1)) : opts.start;
+      var PLAYING = YT.PlayerState.PLAYING, BUFFERING = YT.PlayerState.BUFFERING;
       return new Promise(function (resolve, reject) {
         slot.innerHTML = '<div class="yt-target"></div>';
-        var settled = false, stopped = false, player = null;
-        var readyAt = 0, deadline = Date.now() + 15000, waitingForTap = false;
-        var startAt = 0, endAt = Infinity, placed = false, checked = false, seeks = 0;
+        var player = null, settled = false, stopped = false, checked = false;
+        var readyAt = 0, deadline = Date.now() + 15000, tapAsked = false, adShown = false, stuckSince = 0;
+        var startAt = 0, endAt = Infinity, placedFor = 0, lastSeek = 0;
 
         // One watchdog per attempt: gives up on clips that never start, notices
-        // a round that has moved on, and loops before the closing title cards.
+        // a round that has moved on, sits out ads, and loops before the closing
+        // title cards.
         var watch = setInterval(function () {
           if (opts.cancelled && opts.cancelled()) {
             if (settled) ctl.stop(); else fail('cancelled');
             return;
           }
           if (settled) {
-            try { if (player.getCurrentTime() > endAt) player.seekTo(startAt, true); } catch (e) { /* player gone */ }
+            place();                       // an ad may have stood in for the video's length
+            if (time() > endAt) seek(startAt);
             return;
           }
-          if (waitingForTap) return;
+          if (state() === PLAYING) { check(); return; }
+          if (tapAsked || adShown) return;
           var now = Date.now();
           if (now > deadline) { fail('timeout'); return; }
           // Ready but silent after a few seconds (and not just buffering): the
           // browser is waiting for a click before it plays sound.
-          if (readyAt && now - readyAt > 3500 && opts.onNeedTap && state() !== YT.PlayerState.BUFFERING && state() !== YT.PlayerState.PLAYING) {
-            waitingForTap = true;
-            opts.onNeedTap();
+          if (readyAt && now - readyAt > 3500 && opts.onNeedTap && state() !== BUFFERING) {
+            tapAsked = true;
+            opts.onNeedTap(true);
           }
         }, 400);
 
         function state() { try { return player.getPlayerState(); } catch (e) { return -1; } }
+        function time() { try { return player.getCurrentTime() || 0; } catch (e) { return 0; } }
+        function duration() { try { return player.getDuration() || 0; } catch (e) { return 0; } }
+        function seek(t) {
+          lastSeek = Date.now();
+          try { player.seekTo(t, true); } catch (e) { /* not ready */ }
+        }
         function destroy() {
           clearInterval(watch);
           try { if (player && player.destroy) player.destroy(); } catch (e) { /* already gone */ }
@@ -369,19 +381,43 @@
           fail('unexpected video: ' + data.title);
           return false;
         }
-        // Pick where to play from, once the length is known.
+        // Where to play from, once the video's real length is known (while an ad
+        // plays, YouTube can report the ad's). Worked out again if it changes.
         function place() {
-          if (placed) return;
-          var dur = 0;
-          try { dur = player.getDuration() || 0; } catch (e) { dur = 0; }
-          if (!dur && fixedStart == null) return;
-          placed = true;
+          var dur = duration();
+          if (placedFor && (!dur || Math.abs(dur - placedFor) < 5)) return true;
+          if (fixedStart == null && !(dur >= (opts.custom ? 1 : 30))) return false;
+          placedFor = dur || -1;
           var lo = opts.audio ? 0.22 : 0.25, hi = opts.audio ? 0.4 : 0.45;
           startAt = fixedStart != null ? fixedStart : Math.floor(dur * (lo + Math.random() * (hi - lo)));
           if (dur && fixedStart == null && startAt > dur - 25) startAt = Math.max(0, Math.floor(dur * 0.3));
           // Loop before the closing seconds, where trailers show the title.
-          if (dur) endAt = fixedStart != null ? dur - 1 : Math.max(startAt + 8, dur - (opts.audio ? 6 : 22));
-          if (startAt > 0) player.seekTo(startAt, true);
+          endAt = !dur ? Infinity : fixedStart != null ? dur - 1 : Math.max(startAt + 8, dur - (opts.audio ? 6 : 22));
+          if (Math.abs(time() - startAt) > 1.5) seek(startAt);
+          return true;
+        }
+        // The player says it's playing: has it reached the part we want to show?
+        function check() {
+          if (settled || !titleOk()) return;
+          var now = Date.now();
+          deadline = Math.max(deadline, now + 10000);
+          if (tapAsked) {
+            tapAsked = false;
+            opts.onNeedTap(false);
+          }
+          if (place() && time() + 1.5 >= startAt) {
+            settled = true;
+            resolve(ctl);
+            return;
+          }
+          // Not there yet: the seek is still landing, or YouTube is showing an ad first.
+          if (placedFor && now - lastSeek > 1500) seek(startAt);
+          if (!stuckSince) stuckSince = now;
+          if (!adShown && now - stuckSince > 5000) {
+            adShown = true;
+            if (opts.onAd) opts.onAd();
+            else { settled = true; resolve(ctl); }
+          }
         }
 
         var ctl = {
@@ -415,26 +451,11 @@
             onStateChange: function (e) {
               if (stopped) return;
               if (e.data === YT.PlayerState.ENDED) {
-                player.seekTo(startAt, true);
+                seek(startAt);
                 player.playVideo();
-                return;
+              } else if (e.data === PLAYING && !settled) {
+                check();
               }
-              if (settled || e.data !== YT.PlayerState.PLAYING) return;
-              if (!titleOk()) return;
-              if (waitingForTap) {
-                // Someone clicked: the clip has its sound now, so give it time to settle in.
-                waitingForTap = false;
-                deadline = Date.now() + 10000;
-              }
-              if (!placed) { place(); if (placed && startAt > 0) return; }
-              // Still on the opening frames: the seek hasn't landed yet.
-              if (player.getCurrentTime() + 1.5 < startAt && seeks < 2) {
-                seeks++;
-                player.seekTo(startAt, true);
-                return;
-              }
-              settled = true;
-              resolve(ctl);
             },
             onError: function (e) { fail('YouTube error ' + e.data); },
           },

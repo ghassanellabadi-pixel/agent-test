@@ -645,6 +645,34 @@ textarea { min-height: 170px; resize: vertical; line-height: 1.6; }
 .board.needs-tap .clip-tap { display: grid; }
 .board.needs-tap .board-veil { display: none; }
 .board.needs-tap .clip-shield { pointer-events: none; }
+/* YouTube plays an ad first: show the player, unzoomed, so the host can skip it.
+   The clock waits; the clip's own title strip stays covered. */
+.clip-ad {
+  position: absolute;
+  top: calc(max(12%, 46px) + 10px);
+  left: 50%;
+  z-index: 4;
+  display: none;
+  width: min(80%, 460px);
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--cream);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 900;
+  text-align: center;
+  transform: translateX(-50%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+.board.ad-wait .clip-ad { display: block; }
+.board.ad-wait .board-veil, .board.ad-wait .cover, .board.ad-wait .clip-audio { display: none; }
+.board.ad-wait .clip-slot { transform: none !important; filter: none !important; }
+.board.ad-wait .clip-shield {
+  pointer-events: none;
+  background: linear-gradient(#000, #000) top / 100% max(12%, 46px) no-repeat;
+}
 
 /* Phones: clips play on the big screen only. */
 .watch {

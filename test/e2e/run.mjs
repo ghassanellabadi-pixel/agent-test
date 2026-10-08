@@ -129,7 +129,9 @@ const scenarios = {
     await page.waitForSelector('.final-title');
     check(/Ann|Bob|tie/.test(await page.textContent('.final-title')), 'winner announced');
     await page.click('.recap summary');
-    check((await page.$$('.recap .rc-img')).length >= 1, 'recap shows the pictures');
+    const pictures = await page.evaluate(() => window.__gor.app.sess.game.deck.filter((p) => p.media.type === 'img').length);
+    check((await page.$$('.recap .rc-img')).length === pictures, 'recap shows the pictures');
+    check((await page.$$('.recap li')).length === 5, 'recap lists every question');
     await page.waitForTimeout(1200);
     await shot(page, 'party-final');
     // Playing again loads a fresh set.
@@ -157,6 +159,40 @@ const scenarios = {
     // Keyboard shortcuts still work after clicking into the player.
     await page.keyboard.press('Space');
     await page.waitForSelector('#board[data-ph="rev"]');
+    await ctx.close();
+  },
+
+  async ads({ browser, base, errors }) {
+    const ctx = await browser.newContext(DESKTOP);
+    await installStubs(ctx, { youtube: { adSeconds: 8 } });
+    const page = await ctx.newPage();
+    watch(page, errors, 'ads');
+    await page.goto(base);
+    await chooseSetup(page, 'party', ['movies'], 5, 20);
+    await page.click('[data-act="start-party"]');
+    const clipTime = () => page.evaluate(() => {
+      const p = Object.values(window.__ytPlayers).find((x) => !x.dead);
+      return p ? p.getCurrentTime() : -1;
+    });
+    // First question: the host skips the ad.
+    await waitQuestion(page, 1);
+    await page.waitForSelector('#board.ad-wait', { timeout: 10000 });
+    check((await state(page)).paused, 'clock waits while the ad plays');
+    check(await page.isVisible('#board .clip-ad'), 'ad message shown');
+    check(!(await page.isVisible('#board .veil')), 'player visible so the ad can be skipped');
+    await shot(page, 'ad-wait');
+    const box = await (await page.$('#board .board-media')).boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.75);
+    await waitPlaying(page, 6000);
+    check(!(await page.$('#board.ad-wait')), 'ad message gone once the clip plays');
+    check((await clipTime()) > 30, 'clip plays from part-way in after the ad, not from the top');
+    // Second question: the ad runs out by itself.
+    await page.keyboard.press('Space');
+    await page.keyboard.press('Space');
+    await waitQuestion(page, 2);
+    await page.waitForSelector('#board.ad-wait', { timeout: 10000 });
+    await waitPlaying(page, 10000);
+    check((await clipTime()) > 30, 'second clip starts part-way in too');
     await ctx.close();
   },
 

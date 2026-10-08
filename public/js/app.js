@@ -340,6 +340,7 @@
           // Shown when the browser wants a click before playing sound; the click
           // passes through it to YouTube's own player underneath.
           '<div class="clip-tap" aria-hidden="true"><span class="clip-tap-icon">' + ICONS.play + '</span><span>Click here to start the clip</span></div>' +
+          '<p class="clip-ad" role="status">YouTube is showing an ad first. Skip it when you can: the clip starts right after.</p>' +
           '</div>';
       }
       return '<div class="watch"><span class="watch-icon" aria-hidden="true">' + (md.a ? '🎧' : '📺') + '</span>' +
@@ -738,7 +739,7 @@
   };
 
   function kindLabel(kind) {
-    return kind === 'clip' ? 'clips' : kind === 'song' ? 'audio' : 'photos';
+    return kind === 'clip' ? 'clips' : kind === 'song' ? 'song clips' : 'photos';
   }
 
   function netNote() {
@@ -1082,13 +1083,16 @@
       custom: pz.media.custom,
       names: [pz.answer].concat(pz.alts || []),
       cancelled: function () { return s.clip !== token || app.sess !== s; },
-      onNeedTap: function () {
-        if (s.clip === token) needsTap(true);
+      onNeedTap: function (on) {
+        if (s.clip === token) clipPrompt(on ? 'needs-tap' : '');
+      },
+      onAd: function () {
+        if (s.clip === token) clipPrompt('ad-wait');
       },
     }).then(function (ctl) {
       if (s.clip !== token || app.sess !== s) { ctl.stop(); return; }
       token.ctl = ctl;
-      needsTap(false);
+      clipPrompt('');
       // A click on the player leaves the keyboard focus inside it; take it back for the shortcuts.
       if (document.activeElement && document.activeElement.tagName === 'IFRAME') {
         try { screenEl.focus({ preventScroll: true }); } catch (e) { /* fine */ }
@@ -1097,23 +1101,27 @@
     }, function () {
       if (s.clip !== token || app.sess !== s) return;
       s.clip = null;
-      needsTap(false);
+      clipPrompt('');
       clipFailed(s, pz);
     });
   }
 
   function stopClip(s) {
-    needsTap(false);
+    clipPrompt('');
     if (!s || !s.clip) return;
     if (s.clip.ctl) s.clip.ctl.stop();
     s.clip = null;
   }
 
-  // Browsers can refuse to start a clip with sound until someone clicks. The
-  // board then lets the next click through to YouTube's own player.
-  function needsTap(on) {
+  // While a clip gets going, the board can ask the host for a hand:
+  //   needs-tap  the browser won't play sound until someone clicks; the click
+  //              goes through to YouTube's own player
+  //   ad-wait    YouTube shows an ad first; the player is shown so it can be skipped
+  function clipPrompt(kind) {
     var board = $('#board');
-    if (board) board.classList.toggle('needs-tap', !!on);
+    if (!board) return;
+    board.classList.toggle('needs-tap', kind === 'needs-tap');
+    board.classList.toggle('ad-wait', kind === 'ad-wait');
   }
 
   // The clip wouldn't play here (removed, blocked in this country, or YouTube
