@@ -276,6 +276,86 @@ const scenarios = {
 
   online: (env) => onlineGame(env, null, 'online'),
 
+  // No TV, no computer: a phone hosts over the relay and plays along, and the
+  // other phone plays each clip itself (after a tap, as an iPhone needs).
+  async phonesOnly({ browser, base, errors }) {
+    const broker = await startBroker();
+    const ctxs = [];
+    try {
+      const hostCtx = await contextFor(browser, PHONE, broker.url);
+      ctxs.push(hostCtx);
+      const host = await hostCtx.newPage();
+      watch(host, errors, 'phone-host');
+      await host.goto(base);
+      await host.waitForSelector('.mode[data-act="setup-online"]:not([disabled])');
+      await chooseSetup(host, 'online', ['movies'], 5, 30);
+      check(await host.isChecked('#opt-phoneClips') && await host.isChecked('#opt-hostPlays'), 'on a touch screen: clips on every phone, and the host plays');
+      await host.fill('#host-name', 'Hana');
+      await host.click('[data-act="open-room"]');
+      await host.waitForSelector('#lobby-prep.is-ready', { timeout: 15000 });
+      check(/Hana \(you\)/.test(await host.textContent('#lobby-list')), 'the host is in the player list');
+      const code = await host.$$eval('.room-code span', (els) => els.map((e) => e.textContent).join(''));
+
+      const phoneCtx = await contextFor(browser, PHONE, broker.url);
+      ctxs.push(phoneCtx);
+      await phoneCtx.addInitScript(() => { window.__ytStub = Object.assign({}, window.__ytStub, { blockAutoplay: true }); });
+      const phone = await phoneCtx.newPage();
+      watch(phone, errors, 'phone-player');
+      await phone.goto(base + '#join-' + code);
+      await phone.fill('#join-name', 'Ivo');
+      await phone.click('#join-go');
+      await phone.waitForSelector('.phone-card h1:has-text("You’re in")');
+      await host.waitForFunction(() => document.querySelectorAll('#lobby-list .lobby-player').length === 2);
+      await host.click('[data-act="room-start"]');
+
+      const playerTime = () => phone.evaluate(() => {
+        const p = Object.values(window.__ytPlayers || {}).find((x) => !x.dead);
+        return p ? p.getCurrentTime() : -1;
+      });
+      for (let q = 1; q <= 2; q++) {
+        await waitQuestion(host, q);
+        await waitPlaying(host);
+        const st = await state(host);
+        // The phone gets the clip too, and needs one tap to start it.
+        await phone.waitForSelector('#board .clip .clip-slot');
+        await phone.waitForSelector('#board.needs-tap', { timeout: 10000 });
+        if (q === 1) await shot(phone, 'phones-tap');
+        const box = await (await phone.$('#board .board-media')).boundingBox();
+        await phone.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+        await phone.waitForFunction(() => !document.querySelector('#board.needs-tap') && !document.querySelector('#board .clip.is-loading'), null, { timeout: 8000 });
+        const shared = await host.evaluate(() => window.__gor.app.sess.clip.ctl.span().s);
+        check((await playerTime()) >= shared, `the phone plays the same stretch as the host (${await playerTime()} vs ${shared})`);
+        if (q === 1) { await phone.waitForTimeout(500); await shot(phone, 'phones-clip'); }
+        // The host guesses on its own screen.
+        await host.fill('#host-guess', 'not this one');
+        await host.press('#host-guess', 'Enter');
+        await host.waitForSelector('#host-fb.fb-n, #host-fb.fb-c');
+        await host.fill('#host-guess', st.answer);
+        await host.press('#host-guess', 'Enter');
+        await host.waitForSelector('#host-fb.fb-y');
+        if (q === 1) await shot(host, 'phones-host');
+        await phone.fill('#guess', st.answer);
+        await phone.press('#guess', 'Enter');
+        await host.waitForSelector('#board[data-ph="rev"]', { timeout: 5000 });
+        // The clip keeps playing through the reveal, a little quieter.
+        await phone.waitForSelector('#result .result-big');
+        check(await phone.$('#board .clip-slot iframe.yt-stub'), 'the clip is still there on the reveal');
+        await phone.waitForFunction(() => window.__ytLog.some((e) => e[0] === 'volume' && e[2] === 45));
+        await host.click('[data-act="next"]');
+      }
+      await waitQuestion(host, 3);
+      await host.click('[data-act="end-game"]');
+      await host.click('[data-act="modal-ok"]');
+      await host.waitForSelector('.final-title');
+      check(/Hana/.test(await host.textContent('.podium')), 'the host is on the podium');
+      await phone.waitForSelector('.final-me');
+      check(!(await phone.$('#board iframe')), 'no clip left playing on the phone');
+    } finally {
+      for (const c of ctxs) await c.close();
+      await broker.close();
+    }
+  },
+
   async onlineRelay(env) {
     const broker = await startBroker();
     try {

@@ -507,23 +507,26 @@ textarea { min-height: 170px; resize: vertical; line-height: 1.6; }
   background: #060b2e;
   box-shadow: 0 0 0 3px var(--ink);
 }
-/* On the big screens the question details sit on the picture, like a TV graphic. */
-.board:not([data-md="emoji"]):not(.board-small) .board-top {
-  position: absolute;
-  top: calc(var(--pad) + 12px);
-  left: calc(var(--pad) + 12px);
-  right: calc(var(--pad) + 12px);
-  align-items: flex-start;
-  pointer-events: none;
+/* On big screens the question details sit on the picture, like a TV graphic.
+   On a phone they would cover most of it, so there they stay above it. */
+@media (min-width: 700px) {
+  .board:not([data-md="emoji"]):not(.board-small) .board-top {
+    position: absolute;
+    top: calc(var(--pad) + 12px);
+    left: calc(var(--pad) + 12px);
+    right: calc(var(--pad) + 12px);
+    align-items: flex-start;
+    pointer-events: none;
+  }
+  .board:not([data-md="emoji"]):not(.board-small) .board-top .pill:not(.l3),
+  .board:not([data-md="emoji"]):not(.board-small) .qnum {
+    background: var(--cream);
+    color: var(--ink);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  }
+  .board:not([data-md="emoji"]):not(.board-small) .qnum { padding: 2px 12px; border-radius: 999px; font-size: 20px; }
+  .board:not([data-md="emoji"]):not(.board-small) .timer { filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45)); }
 }
-.board:not([data-md="emoji"]):not(.board-small) .board-top .pill:not(.l3),
-.board:not([data-md="emoji"]):not(.board-small) .qnum {
-  background: var(--cream);
-  color: var(--ink);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-}
-.board:not([data-md="emoji"]):not(.board-small) .qnum { padding: 2px 12px; border-radius: 999px; font-size: 20px; }
-.board:not([data-md="emoji"]):not(.board-small) .timer { filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45)); }
 
 .pic, .clip, .watch { position: absolute; inset: 0; overflow: hidden; }
 .pic-back {
@@ -576,12 +579,17 @@ textarea { min-height: 170px; resize: vertical; line-height: 1.6; }
 /* Stops hovers and clicks reaching the player, and hides the strips where
    YouTube puts the video title and its logo (letterboxing in most trailers). */
 .clip-shield {
+  --bar: max(12%, 46px);
   position: absolute;
   inset: 0;
   z-index: 2;
   background:
-    linear-gradient(#000, #000) top / 100% max(12%, 46px) no-repeat,
-    linear-gradient(#000, #000) bottom / 100% max(12%, 46px) no-repeat;
+    linear-gradient(#000, #000) top / 100% var(--bar) no-repeat,
+    linear-gradient(#000, #000) bottom / 100% var(--bar) no-repeat;
+}
+.board-small .clip-shield { --bar: max(12%, 22px); }
+@media (max-width: 699px) {
+  .clip-shield { --bar: max(12%, 22px); }
 }
 .clip-audio {
   position: absolute;
@@ -649,7 +657,7 @@ textarea { min-height: 170px; resize: vertical; line-height: 1.6; }
    The clock waits; the clip's own title strip stays covered. */
 .clip-ad {
   position: absolute;
-  top: calc(max(12%, 46px) + 10px);
+  top: calc(max(12%, 22px) + 10px);
   left: 50%;
   z-index: 4;
   display: none;
@@ -671,10 +679,30 @@ textarea { min-height: 170px; resize: vertical; line-height: 1.6; }
 .board.ad-wait .clip-slot { transform: none !important; filter: none !important; }
 .board.ad-wait .clip-shield {
   pointer-events: none;
-  background: linear-gradient(#000, #000) top / 100% max(12%, 46px) no-repeat;
+  background: linear-gradient(#000, #000) top / 100% var(--bar) no-repeat;
 }
 
-/* Phones: clips play on the big screen only. */
+/* Phones, while their own copy of the clip loads, or if it can't play. */
+.clip-wait { position: absolute; inset: 0; z-index: 3; display: none; place-items: center; background: var(--ink); }
+.clip-wait .spinner { border-color: rgba(255, 244, 220, 0.2); border-top-color: var(--cream); }
+.clip.is-loading .clip-wait { display: grid; }
+.clip-msg {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: none;
+  place-content: center;
+  margin: 0;
+  padding: 16px;
+  background: var(--ink);
+  color: var(--cream);
+  font-weight: 900;
+  text-align: center;
+}
+.clip.is-failed .clip-msg { display: grid; }
+.board.needs-tap .clip-wait, .board.ad-wait .clip-wait { display: none; }
+
+/* Phones: clips play on the big screen only (unless the host shares them). */
 .watch {
   display: grid;
   place-content: center;
@@ -887,6 +915,9 @@ textarea { min-height: 170px; resize: vertical; line-height: 1.6; }
 .stage.no-scores { grid-template-columns: minmax(0, 1fr); max-width: 1100px; margin: 0 auto; }
 .stage.no-scores .scores { display: none; }
 .stage-main { min-width: 0; }
+.host-play { display: grid; gap: 8px; max-width: 640px; margin: 18px auto 0; }
+.host-play:empty { display: none; }
+.host-me { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin-top: 22px; }
 .controls .end { opacity: 0.8; }
 .auto-count { font-variant-numeric: tabular-nums; }
@@ -1216,6 +1247,12 @@ button.srow-in:hover { border-color: rgba(255, 210, 63, 0.6); }
   .home-hero, .lobby { grid-template-columns: minmax(0, 1fr); }
   .modes { grid-template-columns: minmax(0, 1fr); }
   .net-note { margin-top: -6px; }
+}
+@media (max-width: 699px) {
+  /* Keep the question line to one row on a phone that's running the show. */
+  .board-big .board-top .level { display: none; }
+  .board-big .timer { width: 54px; }
+  .board-big .t-num { font-size: 19px; }
 }
 @media (max-width: 560px) {
   .brand-name { font-size: 15px; }

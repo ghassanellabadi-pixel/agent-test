@@ -302,7 +302,9 @@
   // Play a clip in `slot`. Tries each id until one plays, starting part-way in
   // so studio logos and title cards are skipped. Resolves a controller once the
   // clip is actually playing; rejects if none of the ids work.
-  //   opts.ids, opts.audio, opts.start, opts.custom, opts.names
+  //   opts.ids, opts.audio, opts.custom, opts.names
+  //   opts.start, opts.end  where to play from / loop back before (seconds); worked out here if left out
+  //   opts.from            where to begin instead, within that stretch (a phone catching up with the host)
   //   opts.cancelled()     true once the round has moved on
   //   opts.onNeedTap(on)   the browser wants a click before it plays sound; the
   //                        page should let the next click through to the player
@@ -390,13 +392,15 @@
           var dur = duration();
           if (placedFor && (!dur || Math.abs(dur - placedFor) < 5)) return true;
           if (fixedStart == null && !(dur >= (opts.custom ? 1 : 30))) return false;
+          var again = !!placedFor;
           placedFor = dur || -1;
           var lo = opts.audio ? 0.22 : 0.25, hi = opts.audio ? 0.4 : 0.45;
           startAt = fixedStart != null ? fixedStart : Math.floor(dur * (lo + Math.random() * (hi - lo)));
           if (dur && fixedStart == null && startAt > dur - 25) startAt = Math.max(0, Math.floor(dur * 0.3));
           // Loop before the closing seconds, where trailers show the title.
-          endAt = !dur ? Infinity : fixedStart != null ? dur - 1 : Math.max(startAt + 8, dur - (opts.audio ? 6 : 22));
-          if (Math.abs(time() - startAt) > 1.5) seek(startAt);
+          endAt = opts.end ? opts.end : !dur ? Infinity : fixedStart != null ? dur - 1 : Math.max(startAt + 8, dur - (opts.audio ? 6 : 22));
+          var target = !again && opts.from > startAt && opts.from < endAt - 3 ? opts.from : startAt;
+          if (Math.abs(time() - target) > 1.5) seek(target);
           return true;
         }
         // The player says it's playing: has it reached the part we want to show?
@@ -433,6 +437,8 @@
           volume: function (v) { try { player.setVolume(v); } catch (e) { /* not ready */ } },
           play: function () { try { player.playVideo(); } catch (e) { /* not ready */ } },
           pause: function () { try { player.pauseVideo(); } catch (e) { /* not ready */ } },
+          // The stretch being played, so phones can play the same part.
+          span: function () { return { s: startAt, e: endAt === Infinity ? 0 : Math.floor(endAt) }; },
         };
         var vars = {
           autoplay: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3,

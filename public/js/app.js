@@ -198,6 +198,11 @@
     return list;
   }
 
+  // A touch screen as the host usually means phones only, no TV.
+  function touchFirst() {
+    return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  }
+
   function defaultSettings(mode) {
     return {
       cats: PACKS.map(function (p) { return p.id; }),
@@ -207,6 +212,8 @@
       reveal: 'zoom',
       hints: true,
       auto: false,
+      phoneClips: mode === 'online' && touchFirst(),
+      hostPlays: mode === 'online' && touchFirst(),
     };
   }
 
@@ -221,6 +228,8 @@
       reveal: REVEALS.some(function (x) { return x[0] === s.reveal; }) ? s.reveal : d.reveal,
       hints: typeof s.hints === 'boolean' ? s.hints : d.hints,
       auto: typeof s.auto === 'boolean' ? s.auto : d.auto,
+      phoneClips: typeof s.phoneClips === 'boolean' ? s.phoneClips : d.phoneClips,
+      hostPlays: typeof s.hostPlays === 'boolean' ? s.hostPlays : d.hostPlays,
     };
     if (!out.cats.length) out.cats = d.cats;
     return out;
@@ -328,20 +337,23 @@
         tileCoverHTML() + '</div>';
     }
     if (md && md.t === 'yt') {
-      if (md.poster && !opts.host) {
+      var plays = opts.host || (opts.phone && md.v);
+      if (md.poster && !plays) {
         var p = esc(safeUrl(md.poster));
         return '<div class="pic is-poster"><div class="pic-back" style="background-image:url(&quot;' + p + '&quot;)"></div>' +
           '<img class="pic-main" src="' + p + '" alt="" draggable="false" referrerpolicy="strict-origin-when-cross-origin"></div>';
       }
-      if (opts.host) {
-        return '<div class="clip' + (md.a ? ' is-audio' : '') + '">' +
+      if (plays) {
+        return '<div class="clip' + (md.a ? ' is-audio' : '') + (opts.phone ? ' is-loading' : '') + '">' +
           '<div class="clip-slot fx"></div>' + (md.a ? '' : tileCoverHTML()) +
           '<div class="clip-shield" aria-hidden="true"></div>' +
           (md.a ? '<div class="clip-audio" aria-hidden="true"><div class="eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p>Listen…</p></div>' : '') +
           // Shown when the browser wants a click before playing sound; the click
           // passes through it to YouTube's own player underneath.
-          '<div class="clip-tap" aria-hidden="true"><span class="clip-tap-icon">' + ICONS.play + '</span><span>Click here to start the clip</span></div>' +
+          '<div class="clip-tap" aria-hidden="true"><span class="clip-tap-icon">' + ICONS.play + '</span><span>' + ('ontouchstart' in window ? 'Tap' : 'Click') + ' here to start the clip</span></div>' +
           '<p class="clip-ad" role="status">YouTube is showing an ad first. Skip it when you can: the clip starts right after.</p>' +
+          (opts.phone ? '<div class="clip-wait" aria-hidden="true"><span class="spinner"></span></div>' +
+            '<p class="clip-msg">The clip won’t play on this phone. Watch the host’s screen.</p>' : '') +
           '</div>';
       }
       return '<div class="watch"><span class="watch-icon" aria-hidden="true">' + (md.a ? '🎧' : '📺') + '</span>' +
@@ -385,7 +397,7 @@
     var md = st.md;
     var parts = {
       top: [st.gid, st.n, st.of, (st.cat || []).join(), st.d].join('|'),
-      media: [st.gid, st.n, st.rk, md ? md.t + '|' + (md.src || '') + '|' + (opts.host ? '' : md.poster || '') : 'emoji|' + (st.clue || '')].join('|'),
+      media: [st.gid, st.n, st.rk, md ? md.t + '|' + (md.src || '') + '|' + (opts.host || md.v ? '' : md.poster || '') + '|' + (opts.phone ? md.v || '' : '') : 'emoji|' + (st.clue || '')].join('|'),
       foot: [st.ph, st.hl, JSON.stringify(st.mask || ''), st.hint || '', (md && md.cr) || '', st.ask || ''].join('|'),
       veil: [st.pa ? 1 : 0, st.pr || ''].join('|'),
     };
@@ -874,6 +886,14 @@
               segHTML('reveal', REVEALS, set.reveal, 'How pictures and clips start') +
               switchHTML('hints', set.hints, 'Letter hints', 'Blank tiles, then first letters, as time runs down') +
               switchHTML('auto', set.auto, 'Keep it moving', 'Go to the next question by itself a few seconds after each answer') +
+              (mode === 'online'
+                ? switchHTML('phoneClips', set.phoneClips, 'Clips on every phone', 'Each phone plays the trailer or song too. Turn this off when everyone can see one big screen') +
+                  switchHTML('hostPlays', set.hostPlays, 'I’m playing too', 'Guess on this screen as well, so one phone can host and play') +
+                  '<div class="host-me" id="host-me"' + (set.hostPlays ? '' : ' hidden') + '>' +
+                    '<button type="button" class="av-btn" data-act="cycle-me-av" aria-label="Change your avatar">' + esc(app.me.av) + '</button>' +
+                    '<input id="host-name" maxlength="16" value="' + esc(app.me.nm) + '" placeholder="Your name" aria-label="Your name" autocomplete="nickname">' +
+                  '</div>'
+                : '') +
             '</div>' +
             players +
           '</div>' +
@@ -968,6 +988,7 @@
       '<section class="stage" data-kind="' + s.kind + '">' +
         '<div class="stage-main">' +
           '<div class="marquee stage-marquee"><div class="board board-big" id="board"></div></div>' +
+          '<div class="host-play" id="host-play"></div>' +
           '<div class="controls" id="controls"></div>' +
         '</div>' +
         '<aside class="panel scores" id="scores" aria-label="Scoreboard"></aside>' +
@@ -1009,12 +1030,80 @@
       s.keys.scores = scoresKey;
       renderScores($('#scores'), st, s);
     }
+    renderHostPlay(st, s);
     var controlsKey = [st.ph, st.pa ? 1 : 0, st.pr || '', st.n, s.autoAt ? 1 : 0].join('|');
     if (controlsKey !== s.keys.controls) {
       s.keys.controls = controlsKey;
       $('#controls').innerHTML = controlsHTML(st, s);
     }
     $('.stage').classList.toggle('no-scores', !st.sb.length && s.kind === 'party');
+  }
+
+  // "I'm playing too": the host's own guess box, under the board.
+  function renderHostPlay(st, s) {
+    var box = $('#host-play');
+    if (!box) return;
+    if (!s.self || st.ph !== 'q') {
+      if (box.firstChild) box.innerHTML = '';
+      s.keys.hostPlay = null;
+      return;
+    }
+    var key = st.gid + '|' + st.n + '|' + st.rk;
+    if (s.keys.hostPlay !== key) {
+      s.keys.hostPlay = key;
+      s.selfFb = null;
+      box.innerHTML = '<form data-form="host-guess" class="guess-form" autocomplete="off">' +
+          '<label class="sr-only" for="host-guess">Your guess</label>' +
+          '<input id="host-guess" maxlength="60" placeholder="Your guess" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' +
+          '<button type="submit" class="btn primary">Guess</button>' +
+        '</form>' +
+        '<p class="fb" id="host-fb" aria-live="polite"></p>';
+    }
+    var mine = null;
+    st.sb.forEach(function (r) { if (r[0] === s.self) mine = r; });
+    var got = mine && mine[5];
+    $$('#host-play input, #host-play button').forEach(function (el) { el.disabled = !!got || !!st.pa; });
+    var fb = $('#host-fb');
+    if (got) {
+      fb.className = 'fb fb-y';
+      fb.textContent = 'You got it! +' + fmt(mine[4]);
+    } else if (s.selfFb) {
+      fb.className = 'fb fb-' + s.selfFb.code;
+      fb.textContent = s.selfFb.text;
+    } else {
+      fb.className = 'fb';
+      fb.textContent = '';
+    }
+  }
+
+  function hostGuess(form) {
+    var s = app.sess, g = s && s.game, input = $('#host-guess', form);
+    if (!s || !s.self || g.phase !== 'q' || g.paused() || !input) return;
+    var text = M.clean(input.value, 60);
+    if (!text) return;
+    input.value = '';
+    s.selfAttempt = Math.max(Date.now(), (s.selfAttempt || 0) + 1);
+    var code = g.guess(s.self, g.qi + 1, s.selfAttempt, text);
+    if (code === 'c') {
+      s.selfFb = { code: 'c', text: '“' + text + '” is close! Keep going.' };
+      SFX.play('close');
+    } else if (code === 'n') {
+      s.selfFb = { code: 'n', text: '“' + text + '” isn’t it. Try again.' };
+      SFX.play('wrong');
+    }
+    refreshStage();
+  }
+
+  // The host's own seat in an online game, kept in step with "I'm playing too".
+  function syncHostPlayer(s) {
+    var g = s.game;
+    if (s.set.hostPlays) {
+      s.self = app.me.pid;
+      g.addPlayer(s.self, app.me.nm || 'Host', app.me.av);
+    } else if (s.self) {
+      g.removePlayer(s.self);
+      s.self = null;
+    }
   }
 
   function controlsHTML(st, s) {
@@ -1221,11 +1310,11 @@
     var known = s.lobbyShown || (s.lobbyShown = {});
     list.innerHTML = st.sb.length
       ? st.sb.map(function (r) {
-          var fresh = !known[r[0]];
+          var fresh = !known[r[0]], you = r[0] === s.self;
           known[r[0]] = true;
           return '<li class="lobby-player' + (fresh ? ' is-new' : '') + (r[6] ? '' : ' is-away') + '"><span class="av" aria-hidden="true">' + esc(r[2]) + '</span>' +
-            '<span class="nm">' + esc(r[1]) + (r[6] ? '' : ' <small>(away)</small>') + '</span>' +
-            '<button type="button" class="icon-btn small" data-act="kick" data-pid="' + esc(r[0]) + '" aria-label="Remove ' + esc(r[1]) + '">' + ICONS.x + '</button></li>';
+            '<span class="nm">' + esc(r[1]) + (you ? ' <small>(you)</small>' : r[6] ? '' : ' <small>(away)</small>') + '</span>' +
+            (you ? '' : '<button type="button" class="icon-btn small" data-act="kick" data-pid="' + esc(r[0]) + '" aria-label="Remove ' + esc(r[1]) + '">' + ICONS.x + '</button>') + '</li>';
         }).join('')
       : '<li class="lobby-empty">Waiting for players to join…</li>';
     $('#lobby-count').textContent = online.length + ' / ' + E.MAX_PLAYERS;
@@ -1333,15 +1422,22 @@
     $('#me-score').textContent = mine ? fmt(mine.r[3]) + ' pts' : '';
 
     if (phaseKey !== pl.keys.phase) {
+      var prevKey = pl.keys.phase;
       pl.keys = { phase: phaseKey };
-      pl.boardKeys = {};
-      body.innerHTML = phoneBodyHTML(st, pl);
-      if (st && st.ph === 'q' && !(mine && mine.r[5])) {
-        var input = $('#guess');
-        if (input && !('ontouchstart' in window)) input.focus();
+      if (st && st.ph === 'rev' && prevKey === 'q|' + st.n + '|' + st.gid && $('#board', body)) {
+        // Same question: keep the board, and a clip that's playing, for the reveal.
+        $$('#guess-form, #fb, #phone-status', body).forEach(function (el) { el.remove(); });
+        body.insertAdjacentHTML('beforeend', '<div class="panel result" id="result" aria-live="polite"></div>');
+      } else {
+        pl.boardKeys = {};
+        body.innerHTML = phoneBodyHTML(st, pl);
+        if (st && st.ph === 'q' && !(mine && mine.r[5])) {
+          var input = $('#guess');
+          if (input && !('ontouchstart' in window)) input.focus();
+        }
       }
     }
-    if (!st || pl.hostGone) return;
+    if (!st || pl.hostGone) { syncPhoneClip(pl, null); return; }
 
     var board = $('#board');
     if (board) {
@@ -1387,6 +1483,56 @@
       var res = $('#result');
       if (res) res.innerHTML = resultHTML(st, mine);
     }
+    syncPhoneClip(pl, st);
+  }
+
+  // "Clips on every phone": play the round's clip here too, in step with the host.
+  function syncPhoneClip(pl, st) {
+    var md = st && st.md;
+    var key = md && md.t === 'yt' && md.v && (st.ph === 'q' || st.ph === 'rev') ? [st.gid, st.n, st.rk, md.v].join('|') : '';
+    var c = pl.clip;
+    if (c && (c.key !== key || !c.slot.isConnected)) {
+      stopPhoneClip(pl);
+      c = null;
+    }
+    if (!key) return;
+    if (!c) {
+      var slot = $('#board .clip-slot');
+      // Clips start with the question: not during a pause or after the reveal.
+      if (!slot || st.ph !== 'q' || st.pa) return;
+      var box = slot.parentNode;
+      c = pl.clip = { key: key, slot: slot, ctl: null, paused: false, quiet: false };
+      MEDIA.playClip(slot, {
+        ids: [md.v], start: md.s || 0, end: md.e, from: (md.s || 0) + clockOf(st, pl.at, Date.now()).el / 1000,
+        custom: true, audio: !!md.a,
+        cancelled: function () { return pl.clip !== c || app.player !== pl; },
+        onNeedTap: function (on) { if (pl.clip === c) clipPrompt(on ? 'needs-tap' : ''); },
+        onAd: function () { if (pl.clip === c) clipPrompt('ad-wait'); },
+      }).then(function (ctl) {
+        if (pl.clip !== c) { ctl.stop(); return; }
+        c.ctl = ctl;
+        box.classList.remove('is-loading');
+        clipPrompt('');
+        if (pl.st) syncPhoneClip(pl, pl.st);
+      }, function () {
+        if (pl.clip !== c) return;
+        box.classList.remove('is-loading');
+        box.classList.add('is-failed');
+        clipPrompt('');
+      });
+      return;
+    }
+    if (!c.ctl) return;
+    if (st.pa && !c.paused) { c.paused = true; c.ctl.pause(); }
+    else if (!st.pa && c.paused) { c.paused = false; c.ctl.play(); }
+    if (st.ph === 'rev' && !c.quiet) { c.quiet = true; c.ctl.volume(45); }
+  }
+
+  function stopPhoneClip(pl) {
+    if (!pl || !pl.clip) return;
+    if (pl.clip.ctl) pl.clip.ctl.stop();
+    pl.clip = null;
+    clipPrompt('');
   }
 
   function phoneBodyHTML(st, pl) {
@@ -1591,7 +1737,8 @@
         }
         stopSession();
         var game = new E.Game({ mode: 'online', deck: [], cfg: cfgFrom(set), packInfo: PACK_INFO, onChange: function (w) { onGameChange(w); } });
-        var s = startSession('online', game, set, { ch: ch, code: code, pubTimer: 0 });
+        var s = startSession('online', game, set, { ch: ch, code: code, pubTimer: 0, self: null });
+        syncHostPlayer(s);
         ch.onPeers(function (peers) { hostPeers(s, peers); });
         ch.onStatus(function (status) { hostStatus(s, status); });
         hostPeers(s, ch.peers());
@@ -1644,7 +1791,7 @@
     var g = s.game, here = {};
     peers.forEach(function (peer) {
       var p = peer.p || {};
-      if (p.r !== 'player' || p.code !== s.code || typeof p.pid !== 'string' || !/^p[a-z0-9]{8}$/.test(p.pid)) return;
+      if (p.r !== 'player' || p.code !== s.code || typeof p.pid !== 'string' || !/^p[a-z0-9]{8}$/.test(p.pid) || p.pid === s.self) return;
       var nm = M.clean(p.nm, 16) || 'Player', av = firstGrapheme(p.av) || '🙂';
       here[p.pid] = true;
       var existing = g.byPid(p.pid);
@@ -1662,7 +1809,7 @@
         g.guess(p.pid, guess[1], guess[2], guess[3]);
       }
     });
-    g.players.forEach(function (pl) { if (pl.on && !here[pl.pid]) g.setOnline(pl.pid, false); });
+    g.players.forEach(function (pl) { if (pl.on && !here[pl.pid] && pl.pid !== s.self) g.setOnline(pl.pid, false); });
   }
 
   function hostStatus(s, status) {
@@ -1679,8 +1826,20 @@
     s.pubTimer = setTimeout(function () {
       s.pubTimer = 0;
       if (app.sess !== s) return;
-      s.ch.setPresence({ r: 'host', v: E.PROTO, code: s.code, s: fitState(s.game.publicState()) });
+      var st = s.game.publicState();
+      shareClip(s, st);
+      s.ch.setPresence({ r: 'host', v: E.PROTO, code: s.code, s: fitState(st) });
     }, delay || 0);
+  }
+
+  // "Clips on every phone": which video is playing here, and which stretch of it.
+  function shareClip(s, st) {
+    var ctl = s.clip && s.clip.ctl;
+    if (!s.set.phoneClips || !ctl || !st.md || st.md.t !== 'yt') return;
+    var span = ctl.span();
+    st.md.v = ctl.id;
+    st.md.s = span.s;
+    if (span.e) st.md.e = span.e;
   }
 
   // The host's state goes to every phone several times a second: keep it
@@ -1737,6 +1896,7 @@
     if (!pl) return;
     clearInterval(pl.watch);
     clearTimeout(pl.sendTimer);
+    stopPhoneClip(pl);
     pl.ch.close();
     app.player = null;
     keepAwake(false);
@@ -1942,6 +2102,11 @@
     },
     'modal-close': function () { closeModal(false); },
     'modal-ok': function () { closeModal(true); },
+    'cycle-me-av': function (el) {
+      app.me.av = AVATARS[(AVATARS.indexOf(app.me.av) + 1) % AVATARS.length];
+      store.set('avatar', app.me.av);
+      el.textContent = app.me.av;
+    },
     'cycle-av': function (el) {
       var p = app.roster[Number(el.dataset.i)];
       if (!p) return;
@@ -2002,6 +2167,7 @@
       var s = app.sess;
       if (!s) return;
       s.set = app.settings.online;
+      syncHostPlayer(s);
       prepareRoom(s);
       publishSoon(0);
       show('lobby');
@@ -2076,6 +2242,7 @@
       joinRoom(code, nm, app.me.av);
     },
     guess: submitGuess,
+    'host-guess': hostGuess,
   };
 
   // --------------------------------------------------------------- wiring
@@ -2104,6 +2271,7 @@
     if (el.matches && el.matches('[data-setting]')) {
       app.settings[app.mode][el.dataset.setting] = el.checked;
       saveSettings(app.mode);
+      if (el.dataset.setting === 'hostPlays') { var me = $('#host-me'); if (me) me.hidden = !el.checked; }
     }
   });
 
@@ -2112,6 +2280,9 @@
     if (el.matches('[data-roster]')) {
       var p = app.roster[Number(el.dataset.roster)];
       if (p) { p.nm = M.clean(el.value, 16) || 'Player'; saveRoster(); }
+    } else if (el.id === 'host-name') {
+      app.me.nm = M.clean(el.value, 16);
+      store.set('name', app.me.nm);
     } else if (el.id === 'custom-text') {
       updateCustomStatus();
     } else if (el.id === 'join-code') {

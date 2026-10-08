@@ -238,6 +238,16 @@
     this.emit('players');
   };
 
+  // Someone stops playing (the host switching off "I'm playing too"). Unlike
+  // kick, they can come back.
+  Game.prototype.removePlayer = function (pid) {
+    var before = this.players.length;
+    this.players = this.players.filter(function (p) { return p.pid !== pid; });
+    if (this.players.length === before) return;
+    this.checkAllDone();
+    this.emit('players');
+  };
+
   Game.prototype.start = function () {
     if (!this.deck.length) return false;
     this.qi = 0;

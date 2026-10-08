@@ -25,7 +25,9 @@ Then open http://localhost:3000 on the computer connected to the TV, or share th
 Either way, there are two modes:
 
 - **Play on one screen.** Everyone watches the same screen and shouts their answers. The host taps whoever got it first, or presses the number shown on that player's avatar.
-- **Host an online game.** Friends scan the QR code, open the invite link or type the room code on their own phones, then type their guesses. Answering faster scores more: 1000 points for an instant answer, down to 400 at the buzzer, plus 100 for being first. Photos show on every phone. With `npm start`, friends join over the same Wi-Fi; on the hosted link, they can join from anywhere.
+- **Host an online game.** Friends scan the QR code, open the invite link or type the room code on their own phones, then type their guesses. Answering faster scores more: 1000 points for an instant answer, down to 400 at the buzzer, plus 100 for being first. Photos show on every phone, and clips can too. With `npm start`, friends join over the same Wi-Fi; on the hosted link, they can join from anywhere.
+
+**No TV, just phones?** Host an online game from one phone with **Clips on every phone** and **I'm playing too** switched on (they're on by default on a phone). Everyone, the host included, sees each clue on their own screen and types their guesses.
 
 Keyboard shortcuts on the big screen: **Space** reveals the answer or goes to the next question, **P** pauses, **1–9** award points in one-screen mode, and **M** mutes the sounds.
 
@@ -34,6 +36,8 @@ Keyboard shortcuts on the big screen: **Space** reveals the answer or goes to th
 - **How pictures and clips start:** *Zoomed in* (the picture pulls back as time runs down), *Blurry*, *Tiles* (squares come off one by one) or *Clear*.
 - **Letter hints:** after 40% of the time the answer's blank letter tiles appear, and after 70% the first letters fill in.
 - **Difficulty**, **number of questions** and **seconds per question**.
+- **Clips on every phone** (online games): each phone plays the trailer or song as well, in step with the host. Turn it off when everyone watches one big screen.
+- **I'm playing too** (online games): the host gets a guess box under the board and plays like everyone else.
 
 ### Add your own
 
