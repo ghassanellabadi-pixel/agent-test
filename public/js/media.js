@@ -285,12 +285,15 @@
   }
 
   // Does a YouTube title look like the video we asked for? Guards against
-  // stale or wrong IDs: at least 60% of the answer's main words must appear.
+  // stale or wrong IDs: at least 60% of an answer's main words must appear.
+  // Names too short to check ("ET") don't count, unless that's all there is ("Up").
   function titleMatches(videoTitle, names) {
     var have = M.words(videoTitle).join(' ');
-    return names.some(function (name) {
-      var need = M.words(name).filter(function (w) { return w.length >= 3; });
-      if (!need.length) return true;
+    var checks = names.map(function (name) {
+      return M.words(name).filter(function (w) { return w.length >= 3 && w !== 'the' && w !== 'and'; });
+    }).filter(function (need) { return need.length; });
+    if (!checks.length) return true;
+    return checks.some(function (need) {
       var hit = need.filter(function (w) { return have.indexOf(w) >= 0; }).length;
       return hit / need.length >= 0.6;
     });

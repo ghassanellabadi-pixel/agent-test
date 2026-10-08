@@ -966,8 +966,10 @@ button.srow-in:hover { border-color: rgba(255, 210, 63, 0.6); }
 .join-text { display: grid; justify-items: center; gap: 4px; min-width: 0; }
 .join-step { margin: 0; color: var(--ink-soft); font-size: 17px; }
 .join-url { margin: 0; font-family: var(--font-display); font-size: clamp(18px, 2.4vw, 28px); color: var(--ink); overflow-wrap: anywhere; }
-.join-text .btn.ghost { margin-top: 8px; color: var(--ink); box-shadow: inset 0 0 0 2px rgba(16, 26, 82, 0.3); background: transparent; }
-.qr { width: 168px; height: 168px; padding: 6px; border-radius: 12px; background: #fff; box-shadow: inset 0 0 0 2px var(--ink); }
+.join-share { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.join-share .btn.ghost { margin-top: 8px; color: var(--ink); box-shadow: inset 0 0 0 2px rgba(16, 26, 82, 0.3); background: transparent; }
+.qr { flex: none; width: 168px; height: 168px; padding: 6px; border-radius: 12px; background: #fff; box-shadow: inset 0 0 0 2px var(--ink); }
+.qr svg { display: block; width: 100%; height: 100%; }
 .lobby-side { display: grid; gap: 14px; }
 .lobby-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; max-height: 46vh; overflow: auto; }
 .lobby-player {

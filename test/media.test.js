@@ -117,6 +117,10 @@ test('titleMatches accepts the real video and rejects a stranger', () => {
   assert.ok(ok('E.T. The Extra-Terrestrial | Official Trailer', ['E.T. the Extra-Terrestrial', 'E.T.']));
   assert.ok(!ok('Top 10 Cutest Puppies', ['Titanic']));
   assert.ok(!ok('Frozen II Official Trailer', ['Finding Nemo']));
+  // A short other name ("ET") must not wave every video through.
+  assert.ok(!ok('Top 10 Funniest Cat Videos', ['E.T. the Extra-Terrestrial', 'E.T.', 'ET']));
+  assert.ok(!ok('The Office Bloopers', ['The Bear']), '"the" alone is no match');
+  assert.ok(ok('Up - Official Trailer', ['Up']), 'nothing to check: allowed');
 });
 
 test('prepare attaches photos with credits, clips, posters and songs', async () => {
@@ -128,7 +132,7 @@ test('prepare attaches photos with credits, clips, posters and songs', async () 
     { id: 'x:missing', kind: 'photo', wiki: 'No Such Article', answer: 'Nothing' },
     { id: 'x:noimg', kind: 'photo', wiki: 'Imageless Article', answer: 'Nothing' },
     { id: 'm:titanic', kind: 'clip', wiki: 'Titanic (1997 film)', v: 'titanic', answer: 'Titanic' },
-    { id: 'm:psycho', kind: 'clip', wiki: 'Psycho (1960 film)', v: 'psycho', answer: 'Psycho' },  // no known clip: Wikidata
+    { id: 'm:psycho', kind: 'clip', wiki: 'Psycho (1960 film)', v: 'not-in-videos-js', answer: 'Psycho' },  // no known clip: Wikidata
     { id: 's:despacito', kind: 'song', v: 'despacito', answer: 'Despacito' },
     { id: 's:none', kind: 'song', v: 'no-such-key', answer: 'Silence' },                          // no clip: dropped
   ];

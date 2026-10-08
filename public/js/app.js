@@ -43,6 +43,7 @@
     back: '<svg viewBox="0 0 24 24" aria-hidden="true" class="stroke"><path d="M19 12H6M11 6.5L5.5 12l5.5 5.5"/></svg>',
     copy: '<svg viewBox="0 0 24 24" aria-hidden="true" class="stroke"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg>',
     x: '<svg viewBox="0 0 24 24" aria-hidden="true" class="stroke"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>',
+    share: '<svg viewBox="0 0 24 24" aria-hidden="true" class="stroke"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13"/></svg>',
   };
 
   var screenEl = document.getElementById('screen');
@@ -172,7 +173,7 @@
 
   var app = {
     screen: 'home',
-    net: null,         // { kind: 'ws' | 'claude', ... } or null
+    net: null,         // { kind: 'ws' | 'mqtt', ... } or null
     netReady: false,
     sess: null,        // the game this screen is running (party or online host)
     player: null,      // this phone's seat in someone else's online game
@@ -745,9 +746,8 @@
   function netNote() {
     if (!app.netReady) return 'Checking whether online rooms work here…';
     if (app.net && app.net.kind === 'ws') return 'Online rooms are ready. Friends on the same Wi-Fi can join from their phones.';
-    if (app.net && app.net.kind === 'claude') return 'Online rooms are ready. Friends open this same page and tap Join a game.';
-    if (window.claude) return 'Online rooms aren’t available in this view. One-screen mode works right here.';
-    return 'Online rooms need the small game server (npm start, see the README). One-screen mode works anywhere.';
+    if (app.net && app.net.kind === 'mqtt') return 'Online rooms are ready. Friends join on their own phones, wherever they are.';
+    return 'Online rooms need a newer browser. One-screen mode works right here.';
   }
 
   function startDemo() {
@@ -1164,16 +1164,32 @@
     return base + '#join-' + code;
   }
 
+  // The join link as a QR code, drawn here (js/vendor/qrcode.js).
+  function qrSvg(text) {
+    if (typeof window.qrcode !== 'function') return '';
+    try {
+      var qr = window.qrcode(0, 'M');
+      qr.addData(text);
+      qr.make();
+      return qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+    } catch (e) {
+      return '';
+    }
+  }
+
   SCREENS.lobby = function () {
-    var s = app.sess, code = s.code, ws = app.net && app.net.kind === 'ws';
-    var link = joinLink(code);
-    var how = ws
-      ? '<div class="join-how"><div class="join-text"><p class="join-step">On your phone, go to</p>' +
-          '<p class="join-url">' + esc(link.replace(/^https?:\/\//, '').replace(/#.*$/, '').replace(/\/$/, '')) + '</p>' +
-          '<p class="join-step">and type the code, or scan this:</p>' +
-          '<button type="button" class="btn ghost small" data-act="copy-link">' + ICONS.copy + 'Copy invite link</button></div>' +
-          '<img class="qr" alt="QR code that opens the join page" width="168" height="168" src="api/qr.svg?d=' + encodeURIComponent(link) + '"></div>'
-      : '<div class="join-how"><p class="join-step">Friends open this same page, tap <b>Join a game</b> and type the code.</p></div>';
+    var s = app.sess, code = s.code, lan = app.net && app.net.kind === 'ws';
+    var link = joinLink(code), qr = qrSvg(link);
+    var how = '<div class="join-how"><div class="join-text">' +
+        '<p class="join-step">' + (lan ? 'On your phone, go to' : 'On any phone, anywhere, go to') + '</p>' +
+        '<p class="join-url">' + esc(link.replace(/^https?:\/\//, '').replace(/#.*$/, '').replace(/\/$/, '')) + '</p>' +
+        '<p class="join-step">and type the code' + (qr ? ', or scan this:' : '.') + '</p>' +
+        '<div class="join-share">' +
+          (navigator.share ? '<button type="button" class="btn ghost small" data-act="share-link">' + ICONS.share + 'Share invite</button>' : '') +
+          '<button type="button" class="btn ghost small" data-act="copy-link">' + ICONS.copy + 'Copy invite link</button>' +
+        '</div></div>' +
+        (qr ? '<div class="qr" role="img" aria-label="QR code that opens the join page">' + qr + '</div>' : '') +
+      '</div>';
     screenEl.innerHTML =
       '<section class="lobby">' +
         '<div class="marquee lobby-marquee"><div class="board board-lobby">' +
@@ -1585,7 +1601,7 @@
         publishSoon(0);
         prepareRoom(s);
         show('lobby');
-      }, app.net && app.net.kind === 'claude' ? 900 : 150);
+      }, app.net && app.net.kind === 'ws' ? 150 : 50);
     }, function (err) {
       if (btn) { btn.disabled = false; btn.innerHTML = 'Open the room' + ICONS.next; }
       toast('Couldn’t open a room: ' + (err && err.message ? err.message : 'connection failed') + '. Try again.');
@@ -1667,7 +1683,8 @@
     }, delay || 0);
   }
 
-  // Presence objects are capped at 4 KiB on claude.ai; trim the least useful parts first.
+  // The host's state goes to every phone several times a second: keep it
+  // under 4 KB, trimming the least useful parts first.
   function fitState(st) {
     var LIMIT = 3800;
     function size(x) { return E.utf8Bytes(JSON.stringify(x)); }
@@ -1690,7 +1707,7 @@
     if (go) { go.disabled = true; go.textContent = 'Joining…'; }
     N.detect().then(function (net) {
       if (!net) throw new Error('offline');
-      return N.open(net, code);
+      return N.open(net, code, { seek: true });
     }).then(function (ch) {
       stopPlayer();
       var pl = { ch: ch, code: code, st: null, at: 0, deadline: 0, gid: null, qn: 0, attempt: 0, fb: null, pending: false, hostId: null, started: Date.now(), missingSince: 0, lost: false, hostGone: false, keys: {}, boardKeys: {} };
@@ -2006,6 +2023,12 @@
       s.game.kick(el.dataset.pid);
     },
     'copy-link': function () { if (app.sess) copyText(joinLink(app.sess.code), 'Invite link copied'); },
+    'share-link': function () {
+      var s = app.sess;
+      if (!s || !navigator.share) return;
+      navigator.share({ title: 'Guess-o-Rama', text: 'Join my Guess-o-Rama game! Room code ' + s.code, url: joinLink(s.code) })
+        .catch(function () { /* closed the share sheet */ });
+    },
     'pick-av': function (el) {
       app.me.av = el.dataset.av;
       store.set('avatar', app.me.av);

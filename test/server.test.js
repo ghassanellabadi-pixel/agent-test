@@ -71,18 +71,13 @@ test('serves the game and blocks paths outside it', async (t) => {
   }
 });
 
-test('info and QR endpoints', async (t) => {
+test('info endpoint tells the page that rooms run here', async (t) => {
   const srv = await start();
   t.after(srv.close);
   const info = JSON.parse((await get(srv.base + '/api/info')).body);
   assert.equal(info.ok, true);
+  assert.equal(info.online, true);
   assert.ok(Array.isArray(info.lan));
-  const qr = await get(srv.base + '/api/qr.svg?d=' + encodeURIComponent('http://192.168.1.5:3000/#join-BRTK'));
-  assert.equal(qr.status, 200);
-  assert.match(qr.headers['content-type'], /image\/svg\+xml/);
-  assert.match(qr.body, /^<svg/);
-  assert.equal((await get(srv.base + '/api/qr.svg?d=' + 'x'.repeat(301))).status, 400);
-  assert.equal((await get(srv.base + '/api/qr.svg')).status, 400);
 });
 
 test('relays presence between the peers of a room', async (t) => {

@@ -15,7 +15,6 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
-const qrcode = require('qrcode-generator');
 const { WebSocketServer } = require('ws');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -113,15 +112,6 @@ function createServer() {
     if (url.pathname === '/api/info') {
       const port = server.address().port;
       return sendJson(res, { ok: true, online: true, lan: lanAddresses().map((ip) => `http://${ip}:${port}`) });
-    }
-    if (url.pathname === '/api/qr.svg') {
-      const text = url.searchParams.get('d') || '';
-      if (!text || text.length > 300) return sendText(res, 400, 'Bad request');
-      const qr = qrcode(0, 'M');
-      qr.addData(text);
-      qr.make();
-      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff' });
-      return res.end(qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true }));
     }
     serveStatic(url.pathname, req, res);
   });

@@ -5,6 +5,7 @@
 // Screenshots go to test-results/e2e/.
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
@@ -12,6 +13,7 @@ import { installStubs } from './stubs.mjs';
 
 const require = createRequire(import.meta.url);
 const { createServer } = require('../../server.js');
+const { WebSocketServer, createWebSocketStream } = require('ws');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SHOTS = process.env.SHOTS_DIR || path.join(ROOT, 'test-results', 'e2e');
 mkdirSync(SHOTS, { recursive: true });
@@ -44,6 +46,32 @@ async function waitQuestion(page, n, timeout = 15000) {
 }
 async function waitPlaying(page, timeout = 10000) {
   await page.waitForFunction(() => { const g = window.__gor.app.sess.game; return g.phase !== 'q' || !g.paused(); }, null, { timeout });
+}
+
+// A local MQTT broker standing in for the public ones the hosted game uses.
+async function startBroker() {
+  const { Aedes } = await import('aedes');
+  const broker = await Aedes.createBroker();
+  const server = http.createServer();
+  const wss = new WebSocketServer({ server });
+  wss.on('connection', (socket) => broker.handle(createWebSocketStream(socket)));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return {
+    url: `ws://127.0.0.1:${server.address().port}`,
+    close: () => new Promise((r) => { for (const c of wss.clients) c.terminate(); broker.close(() => server.close(r)); }),
+  };
+}
+
+// A browser that sees the game the way a static host (GitHub Pages) serves
+// it: no game server behind it, so rooms go through the broker.
+async function contextFor(browser, opts, brokerUrl) {
+  const ctx = await browser.newContext(opts);
+  await installStubs(ctx);
+  if (brokerUrl) {
+    await ctx.route('**/api/info', (route) => route.fulfill({ status: 404, body: 'Not found' }));
+    await ctx.addInitScript((url) => { window.GOR_BROKERS = [url]; }, brokerUrl);
+  }
+  return ctx;
 }
 
 async function chooseSetup(page, mode, cats, rounds, seconds) {
@@ -207,7 +235,14 @@ const scenarios = {
       await chooseSetup(page, 'party', ['movies'], 5, 20);
       await page.click('[data-act="start-party"]');
       await waitQuestion(page, 1);
-      await page.waitForSelector('#board[data-md="img"] .pic-main', { timeout: 15000 });
+      await page.waitForSelector('#board[data-md="img"] .pic-main', { timeout: 15000 }).catch(async (e) => {
+        const dbg = await page.evaluate(() => {
+          const s = window.__gor.app.sess, g = s.game, pz = g.r && g.r.pz;
+          return JSON.stringify({ ph: g.phase, n: g.qi + 1, answer: pz && pz.answer, media: pz && pz.media, pr: g.r && g.r.pr, clip: !!s.clip,
+            md: document.querySelector('#board') && document.querySelector('#board').getAttribute('data-md'), log: (window.__ytLog || []).slice(-12) });
+        });
+        throw new Error(label + ': ' + e.message.split('\n')[0] + ' ' + dbg);
+      });
       await waitPlaying(page);
       const st = await state(page);
       check(st.md === 'img' && !st.paused, `${label}: poster shown and the clock runs`);
@@ -239,81 +274,94 @@ const scenarios = {
     await ctx2.close();
   },
 
-  async online({ browser, base, errors }) {
-    const hostCtx = await browser.newContext(DESKTOP);
-    await installStubs(hostCtx);
-    const host = await hostCtx.newPage();
-    watch(host, errors, 'host');
-    await host.goto(base);
-    await host.waitForSelector('.mode[data-act="setup-online"]:not([disabled])');
-    await chooseSetup(host, 'online', ['cities', 'movies', 'animals'], 5, 30);
-    await host.click('[data-act="open-room"]');
-    await host.waitForSelector('#lobby-prep.is-ready', { timeout: 15000 });
-    const code = (await host.$$eval('.room-code span', (els) => els.map((e) => e.textContent).join('')));
-    check(/^[A-Z]{4}$/.test(code), 'room code ' + code);
+  online: (env) => onlineGame(env, null, 'online'),
 
-    const phones = [];
-    for (const nm of ['Dana', 'Eli']) {
-      const ctx = await browser.newContext(PHONE);
-      await installStubs(ctx);
-      const page = await ctx.newPage();
-      watch(page, errors, nm);
-      await page.goto(base + '#join-' + code);
-      await page.fill('#join-name', nm);
-      await page.click('#join-go');
-      await page.waitForSelector('.phone-card h1:has-text("You’re in")');
-      phones.push({ nm, ctx, page });
+  async onlineRelay(env) {
+    const broker = await startBroker();
+    try {
+      await onlineGame(env, broker.url, 'relay');
+    } finally {
+      await broker.close();
     }
-    await host.waitForFunction(() => document.querySelectorAll('#lobby-list .lobby-player').length === 2);
-    await host.waitForTimeout(600);
-    await shot(host, 'online-lobby');
-    await shot(phones[0].page, 'online-phone-lobby');
-    await host.click('[data-act="room-start"]');
-
-    const seen = {};
-    for (let q = 1; q <= 5; q++) {
-      await waitQuestion(host, q);
-      await waitPlaying(host);
-      const st = await state(host);
-      const [a, b] = phones.map((p) => p.page);
-      await a.waitForSelector(`#board[data-ph="q"]`);
-      if (st.md === 'img') {
-        await a.waitForSelector('#board .pic-main');
-        if (!seen.photo) { seen.photo = 1; await a.waitForTimeout(1500); await shot(a, 'online-phone-photo'); await shot(host, 'online-host-photo'); }
-      } else {
-        await a.waitForSelector('#board .watch');
-        if (!seen.clip) { seen.clip = 1; await shot(a, 'online-phone-clip'); }
-      }
-      await b.fill('#guess', 'definitely not it');
-      await b.press('#guess', 'Enter');
-      await b.waitForSelector('#fb.fb-n, #fb.fb-c');
-      await a.fill('#guess', st.answer.toLowerCase());
-      await a.press('#guess', 'Enter');
-      await a.waitForSelector('#fb.fb-y');
-      if (!seen.got) { seen.got = 1; await shot(a, 'online-phone-correct'); await shot(host, 'online-host-scores'); }
-      await b.fill('#guess', st.answer);
-      await b.press('#guess', 'Enter');
-      // Everyone has it: the reveal comes by itself.
-      await host.waitForSelector('#board[data-ph="rev"]', { timeout: 5000 }).catch(async (e) => {
-        const dbg = await host.evaluate(() => { const g = window.__gor.app.sess.game; return JSON.stringify({ ph: g.phase, ans: g.r.pz.answer, got: g.r.got, tries: g.r.tries, fb: g.r.fb, endAt: g.r.endAt, players: g.players.map((p) => [p.pid, p.nm, p.on]) }); });
-        const fbB = await b.textContent('#fb').catch(() => '?');
-        throw new Error(e.message.split('\n')[0] + ' state=' + dbg + ' phoneB=' + fbB + ' guessB=' + (await b.inputValue('#guess').catch(() => '?')));
-      });
-      await a.waitForSelector('#result .result-big');
-      if (!seen.rev) { seen.rev = 1; await a.waitForTimeout(700); await shot(a, 'online-phone-reveal'); }
-      await host.keyboard.press('Space');
-    }
-    await host.waitForSelector('.final-title');
-    for (const p of phones) await p.page.waitForSelector('.final-me');
-    const dana = await phones[0].page.textContent('.final-me h1');
-    check(/1st/.test(dana), 'Dana answered first every time: ' + dana);
-    await phones[0].page.waitForTimeout(1200);
-    await shot(phones[0].page, 'online-phone-final');
-    await shot(host, 'online-host-final');
-    for (const p of phones) await p.ctx.close();
-    await hostCtx.close();
   },
 };
+
+// One full online game: a host screen and two phones. With brokerUrl, as on a
+// static host (rooms over the relay); without, through the game server.
+async function onlineGame({ browser, base, errors }, brokerUrl, label) {
+  const hostCtx = await contextFor(browser, DESKTOP, brokerUrl);
+  const host = await hostCtx.newPage();
+  watch(host, errors, label + '-host');
+  await host.goto(base);
+  await host.waitForSelector('.mode[data-act="setup-online"]:not([disabled])');
+  check(/wherever they are/.test(await host.textContent('#net-note')) === !!brokerUrl, 'the right kind of room: ' + await host.textContent('#net-note'));
+  await chooseSetup(host, 'online', ['cities', 'movies', 'animals'], 5, 30);
+  await host.click('[data-act="open-room"]');
+  await host.waitForSelector('#lobby-prep.is-ready', { timeout: 15000 });
+  const code = (await host.$$eval('.room-code span', (els) => els.map((e) => e.textContent).join('')));
+  check(/^[A-Z]{4}$/.test(code), 'room code ' + code);
+  check(await host.$('.lobby .qr svg'), 'QR code drawn for the join link');
+
+  const phones = [];
+  for (const nm of ['Dana', 'Eli']) {
+    const ctx = await contextFor(browser, PHONE, brokerUrl);
+    const page = await ctx.newPage();
+    watch(page, errors, label + '-' + nm);
+    await page.goto(base + '#join-' + code);
+    await page.fill('#join-name', nm);
+    await page.click('#join-go');
+    await page.waitForSelector('.phone-card h1:has-text("You’re in")');
+    phones.push({ nm, ctx, page });
+  }
+  await host.waitForFunction(() => document.querySelectorAll('#lobby-list .lobby-player').length === 2);
+  await host.waitForTimeout(600);
+  await shot(host, label + '-lobby');
+  await shot(phones[0].page, label + '-phone-lobby');
+  await host.click('[data-act="room-start"]');
+
+  const seen = {};
+  for (let q = 1; q <= 5; q++) {
+    await waitQuestion(host, q);
+    await waitPlaying(host);
+    const st = await state(host);
+    const [a, b] = phones.map((p) => p.page);
+    await a.waitForSelector(`#board[data-ph="q"]`);
+    if (st.md === 'img') {
+      await a.waitForSelector('#board .pic-main');
+      if (!seen.photo) { seen.photo = 1; await a.waitForTimeout(1500); await shot(a, label + '-phone-photo'); await shot(host, label + '-host-photo'); }
+    } else {
+      await a.waitForSelector('#board .watch');
+      if (!seen.clip) { seen.clip = 1; await shot(a, label + '-phone-clip'); }
+    }
+    await b.fill('#guess', 'definitely not it');
+    await b.press('#guess', 'Enter');
+    await b.waitForSelector('#fb.fb-n, #fb.fb-c');
+    await a.fill('#guess', st.answer.toLowerCase());
+    await a.press('#guess', 'Enter');
+    await a.waitForSelector('#fb.fb-y');
+    if (!seen.got) { seen.got = 1; await shot(a, label + '-phone-correct'); await shot(host, label + '-host-scores'); }
+    await b.fill('#guess', st.answer);
+    await b.press('#guess', 'Enter');
+    // Everyone has it: the reveal comes by itself.
+    await host.waitForSelector('#board[data-ph="rev"]', { timeout: 5000 }).catch(async (e) => {
+      const dbg = await host.evaluate(() => { const g = window.__gor.app.sess.game; return JSON.stringify({ ph: g.phase, ans: g.r.pz.answer, got: g.r.got, tries: g.r.tries, fb: g.r.fb, endAt: g.r.endAt, players: g.players.map((p) => [p.pid, p.nm, p.on]) }); });
+      const fbB = await b.textContent('#fb').catch(() => '?');
+      throw new Error(e.message.split('\n')[0] + ' state=' + dbg + ' phoneB=' + fbB + ' guessB=' + (await b.inputValue('#guess').catch(() => '?')));
+    });
+    await a.waitForSelector('#result .result-big');
+    if (!seen.rev) { seen.rev = 1; await a.waitForTimeout(700); await shot(a, label + '-phone-reveal'); }
+    await host.keyboard.press('Space');
+  }
+  await host.waitForSelector('.final-title');
+  for (const p of phones) await p.page.waitForSelector('.final-me');
+  const dana = await phones[0].page.textContent('.final-me h1');
+  check(/1st/.test(dana), 'Dana answered first every time: ' + dana);
+  await phones[0].page.waitForTimeout(1200);
+  await shot(phones[0].page, label + '-phone-final');
+  await shot(host, label + '-host-final');
+  for (const p of phones) await p.ctx.close();
+  await hostCtx.close();
+}
 
 async function main() {
   const only = process.argv.slice(2);
