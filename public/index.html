@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Guess-o-Rama</title>
+  <meta name="description" content="A guessing game show for friends: name the movie from its trailer, the song from a few seconds of music, the city or animal from a zoomed-in photo.">
+  <meta name="theme-color" content="#13238a">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@600;700;800;900&display=swap">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <button class="brand" type="button" data-act="go-home" aria-label="Guess-o-Rama home">
+        <span class="brand-bulbs" aria-hidden="true"></span>
+        <span class="brand-name">Guess-o-Rama</span>
+      </button>
+      <div class="topbar-mid" id="topbar-mid"></div>
+      <div class="topbar-actions">
+        <button class="icon-btn" type="button" id="btn-sound" data-act="toggle-sound" aria-label="Sound on" aria-pressed="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="spk" d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path class="wave" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/><path class="cross" d="M15.5 9.5l5 5M20.5 9.5l-5 5"/></svg>
+        </button>
+        <button class="icon-btn" type="button" id="btn-full" data-act="toggle-full" aria-label="Full screen" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="frame" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+        </button>
+      </div>
+    </header>
+    <main id="screen" tabindex="-1"></main>
+  </div>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="modal" hidden></div>
+  <canvas id="confetti" aria-hidden="true"></canvas>
+  <noscript><p class="noscript">Guess-o-Rama needs JavaScript to run.</p></noscript>
+  <script src="js/data.js"></script>
+  <script src="js/videos.js"></script>
+  <script src="js/data-emoji.js"></script>
+  <script src="js/match.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/media.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/sound.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

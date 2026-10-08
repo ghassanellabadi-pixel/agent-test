@@ -1,0 +1,22 @@
+{
+  "name": "guess-o-rama",
+  "version": "1.0.0",
+  "description": "Guessing game show for friends: name the movie from its trailer, the song from its intro, the city or animal from a zoomed-in photo. Play on one screen, or host a room friends join from their phones.",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node test/e2e/run.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "qrcode-generator": "2.0.4",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "playwright-core": "1.56.1"
+  }
+}
